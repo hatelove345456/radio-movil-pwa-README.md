@@ -12,6 +12,7 @@ const state = {
 localStorage.setItem('rm_id', state.id);
 
 let pc = null, dc = null, mic = null, scanStream = null, raf = 0, pairMode = null, deferredPrompt = null;
+let initiatedByMe = false, reconnecting = false, pttHeld = false, pttWaiting = false, transmitting = false;
 const remoteAudio = $('remoteAudio');
 remoteAudio.autoplay = true;
 remoteAudio.playsInline = true;
@@ -28,6 +29,25 @@ function unpack(s) {
 function fmtTime(ts) { return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
 function setStatus(text, ok) {
   $('netStatus').innerHTML = '<b style="color:' + (ok ? 'var(--ok)' : 'var(--muted)') + '">●</b> ' + text;
+}
+function updateNetworkInfo() {
+  const hint = $('networkHint');
+  if (!navigator.onLine) {
+    hint.className = 'net-hint';
+    hint.textContent = 'Sin red. Activa el hotspot de un móvil (botón 📶) y une a los dos a esa Wi‑Fi.';
+    if (!state.connected) setStatus('Sin red · abre el hotspot', false);
+    return;
+  }
+  const type = (navigator.connection && navigator.connection.type) || 'wifi';
+  if (type === 'cellular') {
+    hint.className = 'net-hint';
+    hint.textContent = 'Estás con datos móviles. Para la versión sin internet, conecta los dos al mismo Wi‑Fi o hotspot.';
+    if (!state.connected) setStatus('Datos móviles · cambia a Wi‑Fi local', false);
+  } else {
+    hint.className = 'net-hint ok';
+    hint.textContent = 'Wi‑Fi local detectado. Evita el Wi‑Fi de invitados: puede aislar los móviles.';
+    if (!state.connected) setStatus('Sin internet · red local lista', false);
+  }
 }
 function tab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
@@ -69,7 +89,31 @@ function newPC() {
     remoteAudio.srcObject = e.streams[0];
     remoteAudio.play().catch(() => {});
   };
+  p.addEventListener('iceconnectionstatechange', () => {
+    const s = p.iceConnectionState;
+    if (s === 'connected' || s === 'completed') {
+      reconnecting = false;
+      setStatus('Conectado · sin internet', true);
+      $('networkHint').className = 'net-hint ok';
+      $('networkHint').textContent = 'Conexión local activa. Evita cambiar de Wi‑Fi mientras habléis.';
+    } else if ((s === 'disconnected' || s === 'failed') && state.connected) {
+      setStatus('Reconectando…', false);
+      $('networkHint').className = 'net-hint';
+      $('networkHint').textContent = 'Se perdió la red local. Vuelve a conectar los dos móviles al mismo Wi‑Fi o reinicia el hotspot.';
+      if (initiatedByMe && !reconnecting) renegotiate();
+    }
+  });
   return p;
+}
+async function renegotiate() {
+  if (!pc || !dc || dc.readyState !== 'open' || reconnecting) return;
+  reconnecting = true;
+  try {
+    const offer = await pc.createOffer({ iceRestart: true });
+    await pc.setLocalDescription(offer);
+    await waitIce(pc);
+    send({ t: 'renegotiate', sdp: pc.localDescription.sdp });
+  } catch (_) { reconnecting = false; }
 }
 function bindDC(channel) {
   dc = channel;
@@ -82,6 +126,8 @@ function bindDC(channel) {
   };
   dc.onclose = () => {
     state.connected = false;
+    initiatedByMe = false;
+    updateNetworkInfo();
     setStatus('Desconectado', false);
   };
   dc.onmessage = e => {
@@ -98,15 +144,35 @@ function bindDC(channel) {
       renderPeers(); drawRadar();
     } else if (m.t === 'ptt') {
       const p = state.peers[m.name]; if (p) { p.talking = !!m.on; renderPeers(); }
-      $('voiceNote').textContent = m.on ? '🔊 ' + m.name + ' está hablando…' : '';
+      if (m.on) {
+        $('voiceNote').textContent = '🔊 ' + m.name + ' está hablando…';
+      } else {
+        $('voiceNote').textContent = '';
+        if (pttWaiting && pttHeld) startTalk();
+      }
+    } else if (m.t === 'renegotiate') {
+      handleRenegotiate(m.sdp).catch(() => { reconnecting = false; });
+    } else if (m.t === 'renegotiate-answer') {
+      pc.setRemoteDescription({ type: 'answer', sdp: m.sdp })
+        .then(() => { reconnecting = false; })
+        .catch(() => { reconnecting = false; });
     }
   };
+}
+async function handleRenegotiate(sdp) {
+  if (!pc) return;
+  await pc.setRemoteDescription({ type: 'offer', sdp });
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  await waitIce(pc);
+  send({ t: 'renegotiate-answer', sdp: pc.localDescription.sdp });
 }
 function send(o) { if (dc && dc.readyState === 'open') dc.send(JSON.stringify(o)); }
 
 async function createGroup() {
   try {
     const stream = await ensureMic();
+    initiatedByMe = true;
     pc = newPC();
     dc = pc.createDataChannel('radio');
     bindDC(dc);
@@ -122,6 +188,7 @@ async function joinGroup(payload) {
   if (data.t !== 'offer') throw new Error('Escanea el código de "Crear grupo"');
   try {
     const stream = await ensureMic();
+    initiatedByMe = false;
     pc = newPC();
     pc.ondatachannel = e => bindDC(e.channel);
     stream.getAudioTracks().forEach(t => pc.addTrack(t, stream));
@@ -265,6 +332,34 @@ function drawRadar() {
   });
 }
 
+/* ---------- PTT con turno ---------- */
+function startTalk() {
+  if (!pttHeld) return;
+  const other = Object.values(state.peers).find(p => p.talking);
+  if (other) {
+    pttWaiting = true;
+    $('voiceNote').textContent = '⏳ Espera a que ' + other.name + ' termine…';
+    return;
+  }
+  pttWaiting = false;
+  if (!transmitting) {
+    transmitting = true;
+    if (mic) mic.getAudioTracks().forEach(t => { t.enabled = true; });
+    send({ t: 'ptt', on: true, name: state.name });
+  }
+  $('voiceNote').textContent = '';
+}
+function stopTalk() {
+  pttHeld = false;
+  pttWaiting = false;
+  if (transmitting) {
+    transmitting = false;
+    if (mic) mic.getAudioTracks().forEach(t => { t.enabled = false; });
+    send({ t: 'ptt', on: false, name: state.name });
+  }
+  if (!Object.values(state.peers).some(p => p.talking)) $('voiceNote').textContent = '';
+}
+
 /* ---------- eventos ---------- */
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => tab(t.dataset.tab)));
 $('channelCard').addEventListener('click', () => { $('channelInput').value = state.channel; $('channelDlg').showModal(); });
@@ -307,16 +402,22 @@ const ptt = $('ptt');
 ptt.addEventListener('pointerdown', e => {
   e.preventDefault(); ptt.setPointerCapture(e.pointerId); ptt.classList.add('down');
   remoteAudio.play().catch(() => {});
-  if (mic) mic.getAudioTracks().forEach(t => { t.enabled = true; });
-  send({ t: 'ptt', on: true, name: state.name });
+  pttHeld = true;
+  startTalk();
 });
 ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => ptt.addEventListener(ev, () => {
   ptt.classList.remove('down');
-  if (mic) mic.getAudioTracks().forEach(t => { t.enabled = false; });
-  send({ t: 'ptt', on: false, name: state.name });
+  stopTalk();
 }));
+$('hotspotBtn').addEventListener('click', () => $('hotspotDlg').showModal());
+$('hotspotClose').addEventListener('click', () => $('hotspotDlg').close());
+window.addEventListener('online', updateNetworkInfo);
+window.addEventListener('offline', updateNetworkInfo);
+if (navigator.connection && navigator.connection.addEventListener) {
+  navigator.connection.addEventListener('change', updateNetworkInfo);
+}
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; });
 
 /* ---------- arranque ---------- */
-saveChannel(); renderPeers(); setStatus('Sin internet · listo', false);
+saveChannel(); renderPeers(); updateNetworkInfo();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

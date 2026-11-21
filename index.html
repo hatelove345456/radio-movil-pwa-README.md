@@ -35,6 +35,8 @@ header{background:var(--surface);padding:14px 16px;border-bottom:1px solid var(-
   border-radius:12px;padding:9px 12px;display:flex;justify-content:space-between;
   font-size:12px;color:var(--muted)}
 .status b{color:var(--ok);font-weight:600}
+.net-hint{padding:8px 16px 0;font-size:11px;color:var(--orange);line-height:1.35}
+.net-hint.ok{color:var(--muted)}
 .tabs{display:flex;gap:6px;padding:12px 16px}
 .tab{flex:1;text-align:center;padding:10px 0;border-radius:10px;background:var(--surface2);
   color:var(--muted);font-size:13px;font-weight:600;border:0}
@@ -94,6 +96,7 @@ dialog input{width:100%;background:var(--surface2);border:1px solid var(--line);
     <button class="iconbtn" id="menuBtn">⋮</button>
   </div>
   <div class="status"><span id="netStatus"><b>●</b> Sin internet · listo</span><span id="peerCount">0 cercanos</span></div>
+  <div class="net-hint" id="networkHint">Comprueba la red antes de crear el grupo.</div>
 </header>
 <div class="tabs">
   <button class="tab active" data-tab="talk">Hablar</button>
@@ -107,13 +110,14 @@ dialog input{width:100%;background:var(--surface2);border:1px solid var(--line);
       <div class="hint">toca para cambiar →</div>
     </div>
     <div class="pttwrap"><button id="ptt">PTT<br><span style="font-size:11px;font-weight:500">mantén pulsado</span></button></div>
-    <div class="pttnote">Mantén pulsado. Todos los del canal escuchan.</div>
+    <div class="pttnote">Mantén pulsado. Si otro habla, esperas tu turno automáticamente.</div>
     <div class="voice" id="voiceNote"></div>
     <div class="row">
       <button class="btn primary" id="createBtn">Crear grupo</button>
       <button class="btn" id="joinBtn">Unirse</button>
       <button class="btn" id="writeBtn">Escribir</button>
       <button class="btn" id="posBtn">📍 Mi posición</button>
+      <button class="btn" id="hotspotBtn">📶 Crear hotspot</button>
     </div>
     <p class="hint" style="margin-top:18px">Cercanos en el canal</p>
     <div id="peers"></div>
@@ -148,6 +152,14 @@ dialog input{width:100%;background:var(--surface2);border:1px solid var(--line);
   4) El primero escanea la respuesta. Ya están conectados.<br>
   5) Añade esta página a la pantalla de inicio para usarla como app, también sin internet.</p>
   <div class="dlgbtns"><button class="btn primary" id="helpClose">Entendido</button></div>
+</dialog>
+<dialog id="hotspotDlg">
+  <p class="label">Hotspot sin internet</p>
+  <p class="hint">Crea una Wi‑Fi local con un móvil. Los dos se conectan a esa red y pueden hablar aunque no haya luz ni datos.</p>
+  <p class="hint"><b>Android:</b> Ajustes → Conexiones → Compartir conexión → <b>Anclaje Wi‑Fi</b> → Activar. Luego el otro móvil se une a esa Wi‑Fi.</p>
+  <p class="hint"><b>iPhone:</b> Ajustes → Datos móviles → Compartir conexión. Si no tiene SIM, el iPhone no puede crear hotspot: usa un Android como anfitrión.</p>
+  <p class="hint">Evita el “Wi‑Fi de invitados”: muchos lo aíslan y los móviles no se ven.</p>
+  <div class="dlgbtns"><button class="btn primary" id="hotspotClose">Entendido</button></div>
 </dialog>
 <dialog id="pairDlg">
   <p class="label" id="pairTitle">Código para unirse</p>
