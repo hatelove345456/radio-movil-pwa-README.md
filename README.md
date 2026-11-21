@@ -24,6 +24,8 @@ Abre el enlace publicado en el móvil:
 
 Después de la primera carga funciona **sin internet**.
 
+> **Guía visual paso a paso con imágenes:** [descarga el PDF](Guia_Radio_Movil.pdf).
+
 ## Cómo usarlo
 
 Los dos móviles deben estar en la misma Wi‑Fi o en el hotspot de uno de ellos.
