@@ -17,6 +17,9 @@ let pairPayload = null;
 /* Voz por canal de datos: evita depender del track de audio de WebRTC, que falla
    en algunos móviles (SDP recortado / autoplay). PCM 16 kHz mono, 16 bits. */
 let audioCtx = null, micSource = null, micProc = null, nextAudioTime = 0, audioUnlocked = false;
+/* Emparejamiento por PIN: buzón MQTT público gratuito, solo durante el emparejamiento. */
+let mqttClient = null, pinRole = null, pinValue = null, pinHandled = false, pinReadyTimer = 0;
+const MQTT_URL = 'wss://broker.hivemq.com:8884/mqtt';
 const remoteAudio = $('remoteAudio');
 remoteAudio.autoplay = true;
 remoteAudio.playsInline = true;
@@ -242,6 +245,8 @@ function bindDC(channel) {
     send({ t: 'hello', name: state.name, channel: state.channel });
     renderPeers();
     if ($('pairDlg').open) $('pairDlg').close();
+    if ($('pinDlg').open) $('pinDlg').close();
+    mqttDisconnect();
   };
   dc.onclose = () => {
     state.connected = false;
@@ -325,6 +330,116 @@ async function joinGroup(payload) {
       'Pulsa «Compartir» y devuelve el enlace al móvil que te invitó. También puedes mostrarle el código QR. ' +
       'La conexión se hará sola.');
   } catch (e) { throw new Error('No se pudo unir: ' + e.message); }
+}
+
+/* ---------- emparejamiento por PIN (internet gratuito solo al emparejar) ---------- */
+function pinTopic(p) { return 'radio-movil/v1/pin/' + p; }
+function mqttPayload(payload) {
+  try { return JSON.parse(typeof payload === 'string' ? payload : new TextDecoder().decode(payload)); }
+  catch (_) { return null; }
+}
+function mqttDisconnect() {
+  clearInterval(pinReadyTimer); pinReadyTimer = 0;
+  if (mqttClient) { try { mqttClient.end(true); } catch (_) {} }
+  mqttClient = null;
+}
+function mqttConnect(role, pin, onReady) {
+  mqttDisconnect(); pinRole = role; pinValue = pin; pinHandled = false;
+  $('pinErr').textContent = 'Conectando con el buzón…';
+  if (typeof mqtt === 'undefined') { $('pinErr').textContent = 'No se pudo cargar el buzón. Comprueba internet.'; return; }
+  const c = mqtt.connect(MQTT_URL, {
+    clientId: 'rm-' + state.id + '-' + role + '-' + Math.random().toString(36).slice(2, 7),
+    clean: true, keepalive: 30, reconnectPeriod: 0
+  });
+  mqttClient = c;
+  c.on('connect', () => {
+    c.subscribe(pinTopic(pin) + '/#', { qos: 0 });
+    $('pinErr').textContent = '';
+    onReady();
+  });
+  c.on('error', e => { $('pinErr').textContent = 'Sin internet: ' + e.message; });
+  c.on('offline', () => { $('pinErr').textContent = 'Se perdió internet durante el emparejamiento.'; });
+  c.on('message', (topic, payload) => { handlePinMessage(topic, mqttPayload(payload)); });
+}
+async function handlePinMessage(topic, m) {
+  if (!m || m.from === state.id) return;
+  const base = pinTopic(pinValue);
+  if (pinRole === 'host' && topic === base + '/ready') {
+    if (!pc || !pc.localDescription) return;
+    mqttClient.publish(base + '/offer', JSON.stringify({
+      from: state.id, t: 'offer', sdp: pc.localDescription.sdp, name: state.name, channel: state.channel
+    }));
+    $('pinErr').textContent = 'El otro móvil está entrando…';
+  } else if (pinRole === 'host' && topic === base + '/answer') {
+    if (pinHandled) return;
+    pinHandled = true;
+    try {
+      await pc.setRemoteDescription({ type: 'answer', sdp: m.sdp });
+      $('pinErr').textContent = 'Conectando…';
+    } catch (e) { pinHandled = false; $('pinErr').textContent = e.message; }
+  } else if (pinRole === 'guest' && topic === base + '/offer') {
+    if (pinHandled) return;
+    pinHandled = true;
+    clearInterval(pinReadyTimer); pinReadyTimer = 0;
+    try {
+      const stream = await ensureMic();
+      initiatedByMe = false;
+      pc = newPC();
+      pc.ondatachannel = e => bindDC(e.channel);
+      stream.getAudioTracks().forEach(t => pc.addTrack(t, stream));
+      await pc.setRemoteDescription({ type: 'offer', sdp: m.sdp });
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await waitIce(pc);
+      mqttClient.publish(base + '/answer', JSON.stringify({
+        from: state.id, t: 'answer', sdp: pc.localDescription.sdp, name: state.name, channel: state.channel
+      }));
+      $('pinErr').textContent = 'Conectando…';
+    } catch (e) { pinHandled = false; $('pinErr').textContent = 'No se pudo unir: ' + e.message; }
+  }
+}
+function showPin(role, pin, help) {
+  pinRole = role;
+  $('pinTitle').textContent = role === 'host' ? 'Tu código de invitación' : 'Unirse con código';
+  $('pinHelp').textContent = help || '';
+  $('pinErr').textContent = '';
+  $('pinCode').style.display = role === 'host' ? 'block' : 'none';
+  $('pinInput').style.display = role === 'guest' ? 'block' : 'none';
+  if (pin) $('pinCode').textContent = pin; else $('pinInput').value = '';
+  $('pinGo').textContent = role === 'host' ? 'Copiar código' : 'Unirse';
+  if (!$('pinDlg').open) $('pinDlg').showModal();
+}
+async function inviteByPin() {
+  if (!navigator.onLine) { showPin('host', null, 'El PIN necesita internet (datos o Wi‑Fi).'); return; }
+  try {
+    const stream = await ensureMic();
+    initiatedByMe = true;
+    pc = newPC(); dc = pc.createDataChannel('radio'); bindDC(dc);
+    stream.getAudioTracks().forEach(t => pc.addTrack(t, stream));
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await waitIce(pc);
+    const pin = String(Math.floor(100000 + Math.random() * 900000));
+    showPin('host', pin, 'Da este código al otro móvil. En cuanto lo escriba, conectaréis.');
+    mqttConnect('host', pin, () => { $('pinErr').textContent = 'Esperando al otro móvil…'; });
+  } catch (e) { $('appStatus').textContent = 'No se pudo invitar: ' + e.message; }
+}
+function openPinJoin() {
+  showPin('guest', null, 'Escribe los 6 números que te ha dado la otra persona.');
+  $('pinInput').focus();
+}
+function joinByPin() {
+  const v = $('pinInput').value.trim();
+  if (!/^\d{6}$/.test(v)) { $('pinErr').textContent = 'Escribe 6 números.'; return; }
+  if (!navigator.onLine) { $('pinErr').textContent = 'El PIN necesita internet (datos o Wi‑Fi).'; return; }
+  mqttConnect('guest', v, () => {
+    const sendReady = () => {
+      if (mqttClient && !pinHandled) mqttClient.publish(pinTopic(v) + '/ready', JSON.stringify({ from: state.id, t: 'ready' }));
+    };
+    sendReady();
+    pinReadyTimer = setInterval(sendReady, 2000);
+    $('pinErr').textContent = 'Buscando la invitación…';
+  });
 }
 
 /* ---------- emparejamiento: enlace compartible o QR ---------- */
@@ -582,8 +697,22 @@ $('menuInstall').addEventListener('click', () => {
   if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt = null; }
   else alert('En iPhone: botón Compartir → "Añadir a la pantalla de inicio".\nEn Android: menú del navegador → "Instalar aplicación".');
 });
-$('createBtn').addEventListener('click', createGroup);
-$('joinBtn').addEventListener('click', () => openScanner('join'));
+$('createBtn').addEventListener('click', inviteByPin);
+$('joinBtn').addEventListener('click', openPinJoin);
+$('menuOfflineCreate').addEventListener('click', () => { $('menuDlg').close(); createGroup(); });
+$('menuOfflineJoin').addEventListener('click', () => { $('menuDlg').close(); openScanner('join'); });
+$('pinGo').addEventListener('click', async () => {
+  if (pinRole === 'host') {
+    try { await navigator.clipboard.writeText(pinValue); $('pinErr').textContent = 'Código copiado. Díselo al otro móvil.'; }
+    catch (_) { $('pinErr').textContent = 'Código: ' + pinValue; }
+  } else joinByPin();
+});
+$('pinInput').addEventListener('keydown', e => { if (e.key === 'Enter') joinByPin(); });
+$('pinCancel').addEventListener('click', () => {
+  mqttDisconnect();
+  if (pc && !state.connected) { try { pc.close(); } catch (_) {} pc = null; dc = null; }
+  $('pinDlg').close();
+});
 $('pairScan').addEventListener('click', () => {
   if (pairMode === 'answer') $('pairDlg').close();
   else startScan();

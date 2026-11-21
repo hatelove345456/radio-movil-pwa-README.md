@@ -85,6 +85,9 @@ dialog input{width:100%;background:var(--surface2);border:1px solid var(--line);
 #scanCanvas{display:none}
 #pasteBox{margin-top:12px}
 #pasteBox input{font-size:13px;letter-spacing:0;text-transform:none}
+.join-code{font-size:42px;font-weight:800;letter-spacing:10px;text-align:center;color:var(--accent);
+  background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0}
+#pinInput{font-size:32px;font-weight:800;letter-spacing:10px;text-align:center;text-transform:uppercase}
 .dlgbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap}
 .err{color:var(--orange);font-size:12px;min-height:16px}
 </style>
@@ -117,15 +120,15 @@ dialog input{width:100%;background:var(--surface2);border:1px solid var(--line);
     <div class="voice" id="audioNote" style="color:var(--muted);font-size:11px">Pulsa «Activar sonido» una vez para oír al otro móvil.</div>
     <div class="row">
       <button class="btn" id="audioBtn">🔊 Activar sonido</button>
-      <button class="btn primary" id="createBtn">Crear grupo</button>
-      <button class="btn" id="joinBtn">Unirse</button>
+      <button class="btn primary" id="createBtn">Invitar (6 números)</button>
+      <button class="btn" id="joinBtn">Unirse con código</button>
       <button class="btn" id="writeBtn">Escribir</button>
       <button class="btn" id="posBtn">📍 Mi posición</button>
       <button class="btn" id="hotspotBtn">📶 Crear hotspot</button>
     </div>
     <p class="hint" style="margin-top:18px">Cercanos en el canal</p>
     <div id="peers"></div>
-    <p class="hint" id="appStatus">Conecta dos móviles: uno crea el grupo y comparte el enlace; el otro lo abre y devuelve su respuesta.</p>
+    <p class="hint" id="appStatus">Uno pulsa «Invitar» y da 6 números; el otro los escribe en «Unirse con código».</p>
   </section>
   <section class="panel" id="msgs">
     <p class="label">Conversación del canal</p>
@@ -146,16 +149,16 @@ dialog input{width:100%;background:var(--surface2);border:1px solid var(--line);
 </dialog>
 <dialog id="menuDlg">
   <p class="label">Opciones</p>
-  <div class="row"><button class="btn" id="menuChannel">Cambiar canal</button><button class="btn" id="menuHelp">Cómo usar</button><button class="btn" id="menuInstall">Instalar en pantalla de inicio</button><button class="btn" id="menuClose">Cerrar</button></div>
+  <div class="row"><button class="btn" id="menuChannel">Cambiar canal</button><button class="btn" id="menuHelp">Cómo usar</button><button class="btn" id="menuOfflineCreate">Sin internet: crear QR</button><button class="btn" id="menuOfflineJoin">Sin internet: unirse QR</button><button class="btn" id="menuInstall">Instalar en pantalla de inicio</button><button class="btn" id="menuClose">Cerrar</button></div>
 </dialog>
 <dialog id="helpDlg">
   <p class="label">Cómo usar</p>
   <p class="hint">1) Los dos móviles se conectan a la misma Wi‑Fi o a un hotspot (sin internet).<br>
-  2) Uno pulsa <b>Crear grupo</b> y comparte el enlace con el otro móvil (AirDrop, Compartir cerca, Bluetooth…).<br>
-  3) El otro móvil abre el enlace y pulsa <b>Compartir respuesta</b> para devolvértelo.<br>
-  4) Tú pegas la respuesta en el recuadro. Ya estáis conectados.<br>
-  Si no podéis compartir enlaces, usa los botones de cámara para escanear los códigos.<br>
-  Añade esta página a la pantalla de inicio para usarla como app, también sin internet.</p>
+  2) Uno pulsa <b>Invitar (6 números)</b>. Aparece un código de 6 dígitos.<br>
+  3) El otro pulsa <b>Unirse con código</b>, escribe los 6 números y conecta solo.<br>
+  El PIN usa internet (datos o Wi‑Fi) solo al emparejar; después la voz va directa entre móviles.<br>
+  Si no hay internet, abre ⋮ → <b>Emparejar sin internet</b> para usar enlace o QR.<br>
+  Añade esta página a la pantalla de inicio para usarla como app.</p>
   <div class="dlgbtns"><button class="btn primary" id="helpClose">Entendido</button></div>
 </dialog>
 <dialog id="hotspotDlg">
@@ -165,6 +168,14 @@ dialog input{width:100%;background:var(--surface2);border:1px solid var(--line);
   <p class="hint"><b>iPhone:</b> Ajustes → Datos móviles → Compartir conexión. Si no tiene SIM, el iPhone no puede crear hotspot: usa un Android como anfitrión.</p>
   <p class="hint">Evita el “Wi‑Fi de invitados”: muchos lo aíslan y los móviles no se ven.</p>
   <div class="dlgbtns"><button class="btn primary" id="hotspotClose">Entendido</button></div>
+</dialog>
+<dialog id="pinDlg">
+  <p class="label" id="pinTitle">Código de invitación</p>
+  <p class="hint" id="pinHelp"></p>
+  <div class="join-code" id="pinCode" style="display:none">------</div>
+  <input id="pinInput" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" autocomplete="off" style="display:none">
+  <p class="err" id="pinErr"></p>
+  <div class="dlgbtns"><button class="btn" id="pinCancel">Cancelar</button><button class="btn primary" id="pinGo">Continuar</button></div>
 </dialog>
 <dialog id="pairDlg">
   <p class="label" id="pairTitle">Emparejar móviles</p>
@@ -188,6 +199,7 @@ dialog input{width:100%;background:var(--surface2);border:1px solid var(--line);
 <script src="https://unpkg.com/qrcode-generator@1.4.4/qrcode.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/jsqr@1.4.0/dist/jsQR.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/lz-string@1.5.0/libs/lz-string.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/mqtt@5.10.4/dist/mqtt.min.js" crossorigin="anonymous"></script>
 <script src="app.js"></script>
 </body>
 </html>

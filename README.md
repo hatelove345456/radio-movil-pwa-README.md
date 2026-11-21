@@ -8,16 +8,17 @@ Esta carpeta es la forma de cumplir el requisito de **un enlace que se pueda env
 
 Una app web instalable (PWA) con la **misma interfaz de la maqueta** (fondo oscuro, acento lima, pestañas Hablar/Mensajes/Mapa, PTT circular). Se abre desde un enlace HTTPS, se añade a la pantalla de inicio y funciona sin internet porque el service worker guarda todos los archivos.
 
-La comunicación entre móviles es **directa, de móvil a móvil**, mediante WebRTC. El emparejamiento se hace con **enlaces compartibles** ( AirDrop, Compartir cerca, Bluetooth…) y el QR queda como alternativa:
+La comunicación entre móviles es **directa, de móvil a móvil**, mediante WebRTC. El emparejamiento se hace con un **PIN de 6 dígitos**:
 
-1. Un móvil pulsa **Crear grupo** → pulsa **Compartir** y envía el enlace.
-2. El otro abre el enlace → pulsa **Compartir respuesta** y te la devuelve.
-3. El primero **pega la respuesta** en el recuadro → conexión establecida.
-4. Si no se pueden compartir enlaces, cualquiera de los dos puede usar los botones de cámara para escanear los QR.
+1. Un móvil pulsa **Invitar (6 números)** → aparece un código tipo `482913`.
+2. El otro pulsa **Unirse con código**, lo escribe y conecta solo.
+3. Ya pueden enviarse texto, posición y mantener pulsado el PTT para hablar.
 
-Ya pueden enviarse texto, posición y mantener pulsado el PTT para hablar. El SDP se comprime a un formato propio (prefijo `RMO2.`), de ~400 caracteres, para que el QR tenga 69 módulos en vez de 177 y sea legible de móvil a móvil.
+El PIN usa **internet gratuito solo durante el emparejamiento**: un buzón MQTT público (`wss://broker.hivemq.com:8884/mqtt`) guarda la oferta y la respuesta bajo ese número durante unos segundos. Después la voz y los datos van **directos entre móviles**, sin pasar por ese buzón. No hay cuenta ni pago.
 
-No hay cuenta, ni servidor de señalización, ni tráfico por internet. Los dos móviles deben estar en la misma Wi‑Fi o hotspot (por ejemplo, el hotspot de uno de ellos, aunque no tenga datos).
+Si no hay internet, el menú ⋮ ofrece **Emparejar sin internet (enlace/QR)**: el SDP se comprime con prefijo `RMO2.` a ~400 caracteres para que el QR tenga 69 módulos en vez de 177.
+
+No hay cuenta ni pago. El buzón MQTT público se usa **solo** para intercambiar el PIN; la conversación no pasa por él. Con el PIN hace falta internet (datos o Wi‑Fi) al emparejar; con el modo QR/enlace basta Wi‑Fi local o hotspot.
 
 ## Cómo publicar el enlace (gratis)
 
@@ -31,7 +32,7 @@ La URL es la misma para los dos sistemas. No hay que pasar por App Store ni Test
 ## Qué funciona ya
 
 - Interfaz idéntica a la maqueta, con tema oscuro/lima.
-- Emparejamiento por **enlaces compartibles** o por QR (cámara + `jsQR`).
+- Emparejamiento por **PIN de 6 dígitos** (buzón MQTT público gratuito) y, sin internet, por enlace o QR.
 - Texto en el canal e historial.
 - Envío de posición, distancia y rumbo en el radar.
 - Voz PTT: el micrófono se activa solo mientras se mantiene pulsado.

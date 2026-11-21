@@ -1,9 +1,10 @@
-const CACHE = 'radio-movil-v5';
+const CACHE = 'radio-movil-v6';
 const ASSETS = [
   './', './index.html', './app.js', './manifest.webmanifest', './icon.svg',
   'https://unpkg.com/qrcode-generator@1.4.4/qrcode.js',
   'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js',
-  'https://unpkg.com/lz-string@1.5.0/libs/lz-string.min.js'
+  'https://unpkg.com/lz-string@1.5.0/libs/lz-string.min.js',
+  'https://unpkg.com/mqtt@5.10.4/dist/mqtt.min.js'
 ];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
