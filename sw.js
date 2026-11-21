@@ -1,4 +1,4 @@
-const CACHE = 'radio-movil-v6';
+const CACHE = 'radio-movil-v7';
 const ASSETS = [
   './', './index.html', './app.js', './manifest.webmanifest', './icon.svg',
   'https://unpkg.com/qrcode-generator@1.4.4/qrcode.js',

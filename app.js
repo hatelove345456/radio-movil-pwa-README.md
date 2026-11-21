@@ -19,6 +19,7 @@ let pairPayload = null;
 let audioCtx = null, micSource = null, micProc = null, nextAudioTime = 0, audioUnlocked = false;
 /* Emparejamiento por PIN: buzón MQTT público gratuito, solo durante el emparejamiento. */
 let mqttClient = null, pinRole = null, pinValue = null, pinHandled = false, pinReadyTimer = 0;
+let pendingIce = [];
 const MQTT_URL = 'wss://broker.hivemq.com:8884/mqtt';
 const remoteAudio = $('remoteAudio');
 remoteAudio.autoplay = true;
@@ -145,6 +146,18 @@ function saveChannel() {
 }
 
 /* ---------- WebRTC ---------- */
+/* localDescription es una foto del SDP antes de reunir candidatos; en Safari/iOS
+   NO se actualiza. currentLocalDescription sí incluye los candidatos ya reunidos. */
+function localSDP(p) {
+  if (!p) return '';
+  return (p.pendingLocalDescription || p.currentLocalDescription || p.localDescription || {}).sdp || '';
+}
+async function addRemoteIce(c) {
+  if (!c) return;
+  if (!pc || !pc.remoteDescription) { pendingIce.push(c); return; }
+  try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
+}
+function flushIce() { const q = pendingIce.splice(0); q.forEach(addRemoteIce); }
 function waitIce(p) {
   return new Promise(resolve => {
     if (p.iceGatheringState === 'complete') return resolve();
@@ -211,11 +224,25 @@ function newPC() {
   /* STUN público gratuito: necesario con PIN si los móviles están en redes distintas
      (uno con datos, otro en Wi‑Fi). No pasa tráfico de voz por él. */
   const p = new RTCPeerConnection({ iceServers: [
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302',
+             'stun:stun.services.mozilla.com', 'stun:stun.cloudflare.com:3478'] }
   ] });
+  p.onicecandidate = e => {
+    if (!e.candidate || !mqttClient || !pinValue || state.connected) return;
+    try {
+      mqttClient.publish(pinTopic(pinValue) + '/candidate', JSON.stringify({
+        from: state.id, t: 'candidate', candidate: e.candidate.toJSON()
+      }));
+    } catch (_) {}
+  };
   p.ontrack = () => { /* la voz viaja por el canal de datos: ver playPCM() */ };
   p.addEventListener('iceconnectionstatechange', () => {
     const s = p.iceConnectionState;
+    if (pinRole && $('pinDlg')?.open && !state.connected) {
+      $('pinErr').textContent = s === 'checking' ? 'Buscando la mejor ruta (ICE: checking)…'
+        : s === 'failed' ? 'No se encontró ruta (ICE: failed). Prueba a poner los dos móviles en el mismo Wi‑Fi.'
+        : 'Conectando… (ICE: ' + s + ')';
+    }
     if (s === 'connected' || s === 'completed') {
       reconnecting = false;
       setStatus('Conectado · sin internet', true);
@@ -237,7 +264,7 @@ async function renegotiate() {
     const offer = await pc.createOffer({ iceRestart: true });
     await pc.setLocalDescription(offer);
     await waitIce(pc);
-    send({ t: 'renegotiate', sdp: pc.localDescription.sdp });
+    send({ t: 'renegotiate', sdp: localSDP(pc) });
   } catch (_) { reconnecting = false; }
 }
 function bindDC(channel) {
@@ -295,7 +322,7 @@ async function handleRenegotiate(sdp) {
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
   await waitIce(pc);
-  send({ t: 'renegotiate-answer', sdp: pc.localDescription.sdp });
+  send({ t: 'renegotiate-answer', sdp: localSDP(pc) });
 }
 function send(o) { if (dc && dc.readyState === 'open') dc.send(JSON.stringify(o)); }
 
@@ -310,7 +337,7 @@ async function createGroup() {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     await waitIce(pc);
-    const code = packCompact({ t: 'offer', c: compactSDP(pc.localDescription.sdp), name: state.name, channel: state.channel });
+    const code = packCompact({ t: 'offer', c: compactSDP(localSDP(pc)), name: state.name, channel: state.channel });
     showPair('invite', code,
       '1) Pulsa «Compartir» y envía el enlace al otro móvil. Si no puedes compartir, muestra el código QR. ' +
       '2) Cuando te devuelvan la respuesta, pégala abajo (o escanea su QR).');
@@ -329,7 +356,7 @@ async function joinGroup(payload) {
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     await waitIce(pc);
-    const code = packCompact({ t: 'answer', c: compactSDP(pc.localDescription.sdp), name: state.name, channel: state.channel });
+    const code = packCompact({ t: 'answer', c: compactSDP(localSDP(pc)), name: state.name, channel: state.channel });
     showPair('answer', code,
       'Pulsa «Compartir» y devuelve el enlace al móvil que te invitó. También puedes mostrarle el código QR. ' +
       'La conexión se hará sola.');
@@ -348,7 +375,7 @@ function mqttDisconnect() {
   mqttClient = null;
 }
 function mqttConnect(role, pin, onReady) {
-  mqttDisconnect(); pinRole = role; pinValue = pin; pinHandled = false;
+  mqttDisconnect(); pinRole = role; pinValue = pin; pinHandled = false; pendingIce = [];
   $('pinErr').textContent = 'Conectando con el buzón…';
   if (typeof mqtt === 'undefined') { $('pinErr').textContent = 'No se pudo cargar el buzón. Comprueba internet.'; return; }
   const c = mqtt.connect(MQTT_URL, {
@@ -368,10 +395,14 @@ function mqttConnect(role, pin, onReady) {
 async function handlePinMessage(topic, m) {
   if (!m || m.from === state.id) return;
   const base = pinTopic(pinValue);
+  if (topic === base + '/candidate' && m.candidate) {
+    await addRemoteIce(m.candidate);
+    return;
+  }
   if (pinRole === 'host' && topic === base + '/ready') {
     if (!pc || !pc.localDescription) return;
     mqttClient.publish(base + '/offer', JSON.stringify({
-      from: state.id, t: 'offer', sdp: pc.localDescription.sdp, name: state.name, channel: state.channel
+      from: state.id, t: 'offer', sdp: localSDP(pc), name: state.name, channel: state.channel
     }));
     $('pinErr').textContent = 'El otro móvil está entrando…';
   } else if (pinRole === 'host' && topic === base + '/answer') {
@@ -379,6 +410,7 @@ async function handlePinMessage(topic, m) {
     pinHandled = true;
     try {
       await pc.setRemoteDescription({ type: 'answer', sdp: m.sdp });
+      flushIce();
       $('pinErr').textContent = 'Conectando…';
     } catch (e) { pinHandled = false; $('pinErr').textContent = e.message; }
   } else if (pinRole === 'guest' && topic === base + '/offer') {
@@ -393,11 +425,12 @@ async function handlePinMessage(topic, m) {
       pc.ondatachannel = e => bindDC(e.channel);
       stream.getAudioTracks().forEach(t => pc.addTrack(t, stream));
       await pc.setRemoteDescription({ type: 'offer', sdp: m.sdp });
+      flushIce();
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       await waitIce(pc);
       mqttClient.publish(base + '/answer', JSON.stringify({
-        from: state.id, t: 'answer', sdp: pc.localDescription.sdp, name: state.name, channel: state.channel
+        from: state.id, t: 'answer', sdp: localSDP(pc), name: state.name, channel: state.channel
       }));
       $('pinErr').textContent = 'Conectando…';
     } catch (e) { pinHandled = false; $('pinErr').textContent = 'No se pudo unir: ' + e.message; }
