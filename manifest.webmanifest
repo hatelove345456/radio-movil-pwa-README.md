@@ -1,0 +1,14 @@
+{
+  "name": "Radio Móvil",
+  "short_name": "Radio",
+  "description": "Walkie-talkie entre móviles sin internet",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B0F14",
+  "theme_color": "#0B0F14",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
