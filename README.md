@@ -40,6 +40,7 @@ La URL es la misma para los dos sistemas. No hay que pasar por App Store ni Test
 - Aviso inteligente de red: distingue datos móviles, Wi‑Fi local y pérdida de red.
 - Intento de **reconexión automática** (ICE restart) si el Wi‑Fi parpadea con la app abierta.
 - **PTT por turnos**: si el otro está hablando, el micrófono se activa solo cuando termina.
+- **Voz por canal de datos**: el audio viaja como PCM 16 kHz dentro del data channel de WebRTC, en vez de depender del track de audio (evita fallos de SDP y de autoplay). Hay un botón **🔊 Activar sonido** que se pulsa una sola vez.
 
 ## Limitaciones honestas
 

@@ -14,9 +14,13 @@ localStorage.setItem('rm_id', state.id);
 let pc = null, dc = null, mic = null, scanStream = null, raf = 0, pairMode = null, deferredPrompt = null;
 let initiatedByMe = false, reconnecting = false, pttHeld = false, pttWaiting = false, transmitting = false;
 let pairPayload = null;
+/* Voz por canal de datos: evita depender del track de audio de WebRTC, que falla
+   en algunos móviles (SDP recortado / autoplay). PCM 16 kHz mono, 16 bits. */
+let audioCtx = null, micSource = null, micProc = null, nextAudioTime = 0, audioUnlocked = false;
 const remoteAudio = $('remoteAudio');
 remoteAudio.autoplay = true;
 remoteAudio.playsInline = true;
+remoteAudio.muted = true;
 
 /* ---------- utilidades ---------- */
 function cleanChannel(v) {
@@ -157,14 +161,52 @@ async function ensureMic() {
     audio: { echoCancellation: true, noiseSuppression: true }, video: false
   });
   mic.getAudioTracks().forEach(t => { t.enabled = false; });
+  initAudio();
   return mic;
+}
+function initAudio() {
+  if (audioCtx || !mic) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  audioCtx = new AC();
+  micSource = audioCtx.createMediaStreamSource(mic);
+  micProc = audioCtx.createScriptProcessor(2048, 1, 1);
+  const sink = audioCtx.createGain(); sink.gain.value = 0;
+  micSource.connect(micProc); micProc.connect(sink); sink.connect(audioCtx.destination);
+  micProc.onaudioprocess = e => {
+    if (!transmitting || !dc || dc.readyState !== 'open' || audioCtx.state !== 'running') return;
+    const input = e.inputBuffer.getChannelData(0);
+    const factor = Math.max(1, Math.round(audioCtx.sampleRate / 16000));
+    const n = Math.floor(input.length / factor);
+    const out = new Int16Array(n);
+    for (let i = 0; i < n; i++) {
+      const v = Math.max(-1, Math.min(1, input[i * factor]));
+      out[i] = v < 0 ? v * 32768 : v * 32767;
+    }
+    dc.send(out.buffer);
+  };
+}
+async function unlockAudio() {
+  audioUnlocked = true;
+  if (audioCtx && audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (_) {} }
+  if (remoteAudio.paused) remoteAudio.play().catch(() => {});
+  $('audioNote').textContent = audioCtx && audioCtx.state === 'running' ? '🔊 Sonido activado' : 'Pulsa de nuevo para activar el sonido';
+}
+function playPCM(data) {
+  if (!audioCtx || !data.length) return;
+  if (audioCtx.state !== 'running') { audioCtx.resume().catch(() => {}); return; }
+  const buf = audioCtx.createBuffer(1, data.length, 16000);
+  const ch = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) ch[i] = data[i] / 32768;
+  const src = audioCtx.createBufferSource(); src.buffer = buf; src.connect(audioCtx.destination);
+  const now = audioCtx.currentTime;
+  if (nextAudioTime < now || nextAudioTime > now + 1) nextAudioTime = now + 0.04;
+  src.start(nextAudioTime);
+  nextAudioTime += buf.duration;
 }
 function newPC() {
   const p = new RTCPeerConnection({ iceServers: [] });
-  p.ontrack = e => {
-    remoteAudio.srcObject = e.streams[0];
-    remoteAudio.play().catch(() => {});
-  };
+  p.ontrack = () => { /* la voz viaja por el canal de datos: ver playPCM() */ };
   p.addEventListener('iceconnectionstatechange', () => {
     const s = p.iceConnectionState;
     if (s === 'connected' || s === 'completed') {
@@ -193,6 +235,7 @@ async function renegotiate() {
 }
 function bindDC(channel) {
   dc = channel;
+  dc.binaryType = 'arraybuffer';
   dc.onopen = () => {
     state.connected = true;
     setStatus('Conectado · sin internet', true);
@@ -207,6 +250,7 @@ function bindDC(channel) {
     setStatus('Desconectado', false);
   };
   dc.onmessage = e => {
+    if (e.data instanceof ArrayBuffer) { playPCM(new Int16Array(e.data)); return; }
     let m; try { m = JSON.parse(e.data); } catch (_) { return; }
     if (m.t === 'hello') {
       state.peers[m.name] = { name: m.name, channel: m.channel, pos: null, talking: false };
@@ -222,6 +266,7 @@ function bindDC(channel) {
       const p = state.peers[m.name]; if (p) { p.talking = !!m.on; renderPeers(); }
       if (m.on) {
         $('voiceNote').textContent = '🔊 ' + m.name + ' está hablando…';
+        if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
       } else {
         $('voiceNote').textContent = '';
         if (pttWaiting && pttHeld) startTalk();
@@ -567,7 +612,7 @@ $('posBtn').addEventListener('click', () => {
 const ptt = $('ptt');
 ptt.addEventListener('pointerdown', e => {
   e.preventDefault(); ptt.setPointerCapture(e.pointerId); ptt.classList.add('down');
-  remoteAudio.play().catch(() => {});
+  unlockAudio();
   pttHeld = true;
   startTalk();
 });
@@ -575,6 +620,10 @@ ptt.addEventListener('pointerdown', e => {
   ptt.classList.remove('down');
   stopTalk();
 }));
+$('audioBtn').addEventListener('click', unlockAudio);
+document.addEventListener('pointerdown', () => {
+  if (!audioUnlocked) unlockAudio();
+}, true);
 $('hotspotBtn').addEventListener('click', () => $('hotspotDlg').showModal());
 $('hotspotClose').addEventListener('click', () => $('hotspotDlg').close());
 window.addEventListener('online', updateNetworkInfo);
