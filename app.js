@@ -13,6 +13,7 @@ localStorage.setItem('rm_id', state.id);
 
 let pc = null, dc = null, mic = null, scanStream = null, raf = 0, pairMode = null, deferredPrompt = null;
 let initiatedByMe = false, reconnecting = false, pttHeld = false, pttWaiting = false, transmitting = false;
+let pairPayload = null;
 const remoteAudio = $('remoteAudio');
 remoteAudio.autoplay = true;
 remoteAudio.playsInline = true;
@@ -22,11 +23,86 @@ function cleanChannel(v) {
   return (v || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'channel-1';
 }
 function pack(o) { return 'RMO1.' + LZString.compressToEncodedURIComponent(JSON.stringify(o)); }
+/* SDP compacto: el SDP completo son ~1800 caracteres y produce un QR de 177 módulos,
+   ilegible de móvil a móvil. Guardamos solo los campos necesarios y lo reconstruimos. */
+function hexToB64(h) {
+  let s = ''; for (let i = 0; i < h.length; i += 2) s += String.fromCharCode(parseInt(h.substr(i, 2), 16));
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64ToHex(s) {
+  s = s.replace(/-/g, '+').replace(/_/g, '/');
+  s += '==='.slice(0, (4 - s.length % 4) % 4);
+  const bin = atob(s); let h = '';
+  for (const ch of bin) h += ('0' + ch.charCodeAt(0).toString(16)).slice(-2);
+  return h;
+}
+function uuid(h) { return h.replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5'); }
+function compactSDP(sdp) {
+  const L = sdp.split(/\r\n|\n/);
+  const get = p => (L.find(l => l.startsWith(p)) || '').slice(p.length);
+  const fp = (L.find(l => l.startsWith('a=fingerprint:sha-256 ')) || '').slice(22).replace(/:/g, '');
+  const msid = get('a=msid:').split(/\s+/);
+  const ssrcLine = L.find(l => l.startsWith('a=ssrc:')) || '';
+  const sections = []; let cur = null;
+  L.forEach(l => {
+    if (l.startsWith('m=')) { cur = { type: l.split(' ')[0], mid: '' }; sections.push(cur); }
+    else if (cur && l.startsWith('a=mid:')) cur.mid = l.slice(6);
+  });
+  const cand = L.filter(l => l.startsWith('a=candidate:') && l.includes(' typ host ')).slice(0, 3).map(l => l.slice(12));
+  return {
+    v: 1, id: (get('o=').match(/^-\s+(\d+)/) || [])[1] || '1',
+    u: get('a=ice-ufrag:'), p: get('a=ice-pwd:'), f: hexToB64(fp),
+    a: (sections.find(s => s.type === 'm=audio') || {}).mid || '0',
+    b: (sections.find(s => s.type === 'm=application') || {}).mid || '1',
+    m: hexToB64((msid[0] || '').replace(/-/g, '')), t: hexToB64((msid[1] || '').replace(/-/g, '')),
+    s: (ssrcLine.match(/^(\d+)/) || [])[1] || '1',
+    c: (ssrcLine.match(/cname:(\S+)/) || [])[1] || 'rm', cand: cand
+  };
+}
+function buildSDP(c, answer) {
+  const f = b64ToHex(c.f).toUpperCase().match(/.{2}/g).join(':');
+  const m = uuid(b64ToHex(c.m)), t = uuid(b64ToHex(c.t));
+  const setup = answer ? 'active' : 'actpass';
+  const base = [
+    'a=ice-ufrag:' + c.u, 'a=ice-pwd:' + c.p, 'a=ice-options:trickle',
+    'a=fingerprint:sha-256 ' + f, 'a=setup:' + setup
+  ];
+  const L = [
+    'v=0', 'o=- ' + c.id + ' 2 IN IP4 127.0.0.1', 's=-', 't=0 0',
+    'a=group:BUNDLE ' + c.a + ' ' + c.b, 'a=extmap-allow-mixed', 'a=msid-semantic: WMS ' + m,
+    'm=audio 9 UDP/TLS/RTP/SAVPF 111', 'c=IN IP4 0.0.0.0', 'a=rtcp:9 IN IP4 0.0.0.0',
+    ...base, 'a=mid:' + c.a, 'a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid',
+    'a=sendrecv', 'a=msid:' + m + ' ' + t, 'a=rtcp-mux',
+    'a=rtpmap:111 opus/48000/2', 'a=fmtp:111 minptime=10;useinbandfec=1',
+    'a=ssrc:' + c.s + ' cname:' + c.c, 'a=ssrc:' + c.s + ' msid:' + m + ' ' + t,
+    ...(c.cand || []).map(x => 'a=candidate:' + x),
+    'm=application 9 UDP/DTLS/SCTP webrtc-datachannel', 'c=IN IP4 0.0.0.0', ...base,
+    'a=mid:' + c.b, 'a=sctp-port:5000', 'a=max-message-size:262144'
+  ];
+  return L.join('\r\n') + '\r\n';
+}
+function packCompact(o) { return 'RMO2.' + LZString.compressToEncodedURIComponent(JSON.stringify(o)); }
 function unpack(s) {
-  if (!s || !s.startsWith('RMO1.')) throw new Error('Código no reconocido');
-  return JSON.parse(LZString.decompressFromEncodedURIComponent(s.slice(5)));
+  if (!s || !s.startsWith('RMO1.') && !s.startsWith('RMO2.')) throw new Error('Código no reconocido');
+  const o = JSON.parse(LZString.decompressFromEncodedURIComponent(s.slice(5)));
+  if (s.startsWith('RMO2.')) o.sdp = buildSDP(o.c, o.t === 'answer');
+  return o;
 }
 function fmtTime(ts) { return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+function urlFor(code, kind) {
+  return location.origin + location.pathname + '?' + kind + '=' + encodeURIComponent(code);
+}
+function codeFromText(raw) {
+  const s = (raw || '').trim();
+  if (!s) return null;
+  if (/^https?:\/\//i.test(s)) {
+    try {
+      const u = new URL(s);
+      return u.searchParams.get('join') || u.searchParams.get('answer') || null;
+    } catch (_) { return null; }
+  }
+  return s.startsWith('RMO1.') || s.startsWith('RMO2.') ? s : null;
+}
 function setStatus(text, ok) {
   $('netStatus').innerHTML = '<b style="color:' + (ok ? 'var(--ok)' : 'var(--muted)') + '">●</b> ' + text;
 }
@@ -180,7 +256,10 @@ async function createGroup() {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     await waitIce(pc);
-    showQR(pack({ t: 'offer', sdp: pc.localDescription.sdp, name: state.name, channel: state.channel }), 'waitAnswer');
+    const code = packCompact({ t: 'offer', c: compactSDP(pc.localDescription.sdp), name: state.name, channel: state.channel });
+    showPair('invite', code,
+      '1) Pulsa «Compartir» y envía el enlace al otro móvil. Si no puedes compartir, muestra el código QR. ' +
+      '2) Cuando te devuelvan la respuesta, pégala abajo (o escanea su QR).');
   } catch (e) { $('appStatus').textContent = 'No se pudo crear el grupo: ' + e.message; }
 }
 async function joinGroup(payload) {
@@ -196,29 +275,52 @@ async function joinGroup(payload) {
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     await waitIce(pc);
-    showQR(pack({ t: 'answer', sdp: pc.localDescription.sdp, name: state.name, channel: state.channel }), 'answer');
+    const code = packCompact({ t: 'answer', c: compactSDP(pc.localDescription.sdp), name: state.name, channel: state.channel });
+    showPair('answer', code,
+      'Pulsa «Compartir» y devuelve el enlace al móvil que te invitó. También puedes mostrarle el código QR. ' +
+      'La conexión se hará sola.');
   } catch (e) { throw new Error('No se pudo unir: ' + e.message); }
 }
 
-/* ---------- QR / escáner ---------- */
-function showQR(text, mode) {
+/* ---------- emparejamiento: enlace compartible o QR ---------- */
+function showPair(mode, code, help) {
   pairMode = mode;
-  $('pairTitle').textContent = mode === 'waitAnswer' ? '1/2 · Muestra este código' : '2/2 · Muestra este código';
-  const qr = qrcode(0, 'L'); qr.addData(text); qr.make();
-  $('qr').src = qr.createDataURL(5, 2);
-  $('qr').style.display = 'block';
-  $('scanVideo').style.display = 'none';
+  pairPayload = code || null;
+  $('pairTitle').textContent =
+    mode === 'invite' ? '1/2 · Invitación' :
+    mode === 'answer' ? '2/2 · Respuesta' : 'Únete al grupo';
+  $('pairHelp').textContent = help || '';
   $('pairErr').textContent = '';
-  $('pairScan').textContent = mode === 'waitAnswer' ? 'Escanear respuesta' : 'Cerrar';
-  $('pairDlg').showModal();
+  if (code) {
+    try {
+      const qr = qrcode(0, 'L'); qr.addData(code); qr.make();
+      $('qr').src = qr.createDataURL(5, 2);
+      $('qr').style.display = 'block';
+    } catch (_) { $('qr').style.display = 'none'; }
+    stopScan();
+    $('pairShare').style.display = ''; $('pairCopy').style.display = '';
+  } else {
+    $('qr').style.display = 'none';
+    $('pairShare').style.display = 'none'; $('pairCopy').style.display = 'none';
+  }
+  const pasteBox = $('pasteBox');
+  if (mode === 'invite' || mode === 'join') {
+    pasteBox.style.display = 'block';
+    $('pasteLabel').textContent = mode === 'invite'
+      ? 'Pega aquí la respuesta que te envíe el otro móvil:'
+      : 'Pega aquí la invitación que te enviaron:';
+    $('pairPaste').value = '';
+  } else {
+    pasteBox.style.display = 'none';
+  }
+  $('pairScan').textContent = mode === 'invite' ? 'Escanear respuesta'
+    : mode === 'answer' ? 'Cerrar' : 'Escanear invitación';
+  if (!$('pairDlg').open) $('pairDlg').showModal();
 }
 function openScanner(mode) {
-  pairMode = mode;
-  $('pairTitle').textContent = 'Escanea el código del otro móvil';
-  $('qr').style.display = 'none';
-  $('pairErr').textContent = '';
-  $('pairScan').textContent = 'Reintentar';
-  $('pairDlg').showModal();
+  showPair(mode, null, mode === 'join'
+    ? 'Escanea el código del móvil que creó el grupo, o pega su enlace abajo.'
+    : 'Escanea la respuesta del otro móvil, o pégala abajo.');
   startScan();
 }
 async function startScan() {
@@ -229,13 +331,15 @@ async function startScan() {
     scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
     const v = $('scanVideo'); v.srcObject = scanStream; v.playsInline = true; await v.play();
     const c = $('scanCanvas'); const ctx = c.getContext('2d', { willReadFrequently: true });
+    let frames = 0;
     const loop = () => {
       if (v.readyState === v.HAVE_ENOUGH_DATA) {
         c.width = v.videoWidth; c.height = v.videoHeight;
         ctx.drawImage(v, 0, 0, c.width, c.height);
         const img = ctx.getImageData(0, 0, c.width, c.height);
-        const code = typeof jsQR === 'function' ? jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' }) : null;
+        const code = typeof jsQR === 'function' ? jsQR(img.data, img.width, img.height) : null;
         if (code) { stopScan(); onScanned(code.data); return; }
+        if (++frames === 150) $('pairErr').textContent = 'Si no lo detecta, aleja un poco el móvil y que el código ocupe casi toda la pantalla.';
       }
       raf = requestAnimationFrame(loop);
     };
@@ -251,7 +355,7 @@ function stopScan() {
 }
 async function onScanned(text) {
   try {
-    if (pairMode === 'waitAnswer') {
+    if (pairMode === 'invite' || pairMode === 'waitAnswer') {
       const data = unpack(text);
       if (data.t !== 'answer') throw new Error('Escanea la respuesta del otro móvil');
       await pc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
@@ -262,6 +366,64 @@ async function onScanned(text) {
       $('pairDlg').close();
     }
   } catch (e) { $('pairErr').textContent = e.message; }
+}
+async function applyPasted() {
+  const code = codeFromText($('pairPaste').value);
+  if (!code) { $('pairErr').textContent = 'Pega un enlace de Radio Móvil válido.'; return; }
+  stopScan();
+  try {
+    const data = unpack(code);
+    if (pairMode === 'invite') {
+      if (data.t !== 'answer') throw new Error('Ese enlace no es una respuesta');
+      await pc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
+      $('pairErr').textContent = 'Conectando…';
+    } else if (pairMode === 'join') {
+      if (data.t !== 'offer') throw new Error('Ese enlace no es una invitación');
+      await joinGroup(code);
+    }
+  } catch (e) { $('pairErr').textContent = e.message; }
+}
+async function sharePair() {
+  if (!pairPayload) return;
+  const url = urlFor(pairPayload, pairMode === 'invite' ? 'join' : 'answer');
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'Radio Móvil', text: 'Únete a mi canal de Radio Móvil', url });
+      return;
+    } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  await copyPair();
+}
+async function copyPair() {
+  if (!pairPayload) return;
+  const url = urlFor(pairPayload, pairMode === 'invite' ? 'join' : 'answer');
+  try {
+    await navigator.clipboard.writeText(url);
+    $('pairErr').textContent = 'Enlace copiado. Pégalo en el otro móvil.';
+  } catch (_) {
+    $('pairErr').textContent = 'No se pudo copiar. Usa el botón «Compartir».';
+  }
+}
+async function handleIncomingUrl() {
+  const u = new URL(location.href);
+  const join = u.searchParams.get('join'), answer = u.searchParams.get('answer');
+  if (!join && !answer) return;
+  history.replaceState(null, '', location.pathname);
+  if (join) {
+    try { await joinGroup(join); }
+    catch (e) { $('appStatus').textContent = e.message; }
+  } else if (answer) {
+    if (!pc) {
+      $('appStatus').textContent = 'Abre la app donde pulsaste «Crear grupo» y pega allí la respuesta.';
+      return;
+    }
+    try {
+      const data = unpack(answer);
+      if (data.t !== 'answer') throw new Error('Enlace de respuesta no válido');
+      await pc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
+      $('appStatus').textContent = 'Conectando…';
+    } catch (e) { $('appStatus').textContent = e.message; }
+  }
 }
 
 /* ---------- interfaz ---------- */
@@ -381,6 +543,10 @@ $('pairScan').addEventListener('click', () => {
   if (pairMode === 'answer') $('pairDlg').close();
   else startScan();
 });
+$('pasteGo').addEventListener('click', applyPasted);
+$('pairPaste').addEventListener('keydown', e => { if (e.key === 'Enter') applyPasted(); });
+$('pairShare').addEventListener('click', sharePair);
+$('pairCopy').addEventListener('click', copyPair);
 $('pairCancel').addEventListener('click', () => { stopScan(); $('pairDlg').close(); });
 $('writeBtn').addEventListener('click', () => { tab('msgs'); $('draft').focus(); });
 $('sendBtn').addEventListener('click', sendDraft);
@@ -420,4 +586,5 @@ window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferr
 
 /* ---------- arranque ---------- */
 saveChannel(); renderPeers(); updateNetworkInfo();
+handleIncomingUrl();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

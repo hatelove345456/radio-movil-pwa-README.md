@@ -83,6 +83,8 @@ dialog input{width:100%;background:var(--surface2);border:1px solid var(--line);
 #qr{display:block;margin:12px auto;max-width:100%;background:#fff;padding:8px;border-radius:10px}
 #scanVideo{width:100%;border-radius:12px;background:#000;display:none}
 #scanCanvas{display:none}
+#pasteBox{margin-top:12px}
+#pasteBox input{font-size:13px;letter-spacing:0;text-transform:none}
 .dlgbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap}
 .err{color:var(--orange);font-size:12px;min-height:16px}
 </style>
@@ -121,7 +123,7 @@ dialog input{width:100%;background:var(--surface2);border:1px solid var(--line);
     </div>
     <p class="hint" style="margin-top:18px">Cercanos en el canal</p>
     <div id="peers"></div>
-    <p class="hint" id="appStatus">Conecta dos móviles: uno crea el grupo y el otro se une escaneando el código.</p>
+    <p class="hint" id="appStatus">Conecta dos móviles: uno crea el grupo y comparte el enlace; el otro lo abre y devuelve su respuesta.</p>
   </section>
   <section class="panel" id="msgs">
     <p class="label">Conversación del canal</p>
@@ -147,10 +149,11 @@ dialog input{width:100%;background:var(--surface2);border:1px solid var(--line);
 <dialog id="helpDlg">
   <p class="label">Cómo usar</p>
   <p class="hint">1) Los dos móviles se conectan a la misma Wi‑Fi o a un hotspot (sin internet).<br>
-  2) Uno pulsa <b>Crear grupo</b> y muestra el código.<br>
-  3) El otro pulsa <b>Unirse</b>, escanea el código y muestra su código de respuesta.<br>
-  4) El primero escanea la respuesta. Ya están conectados.<br>
-  5) Añade esta página a la pantalla de inicio para usarla como app, también sin internet.</p>
+  2) Uno pulsa <b>Crear grupo</b> y comparte el enlace con el otro móvil (AirDrop, Compartir cerca, Bluetooth…).<br>
+  3) El otro móvil abre el enlace y pulsa <b>Compartir respuesta</b> para devolvértelo.<br>
+  4) Tú pegas la respuesta en el recuadro. Ya estáis conectados.<br>
+  Si no podéis compartir enlaces, usa los botones de cámara para escanear los códigos.<br>
+  Añade esta página a la pantalla de inicio para usarla como app, también sin internet.</p>
   <div class="dlgbtns"><button class="btn primary" id="helpClose">Entendido</button></div>
 </dialog>
 <dialog id="hotspotDlg">
@@ -162,11 +165,22 @@ dialog input{width:100%;background:var(--surface2);border:1px solid var(--line);
   <div class="dlgbtns"><button class="btn primary" id="hotspotClose">Entendido</button></div>
 </dialog>
 <dialog id="pairDlg">
-  <p class="label" id="pairTitle">Código para unirse</p>
+  <p class="label" id="pairTitle">Emparejar móviles</p>
+  <p class="hint" id="pairHelp"></p>
   <img id="qr" alt="Código QR">
   <video id="scanVideo" playsinline muted autoplay></video><canvas id="scanCanvas"></canvas>
+  <div id="pasteBox">
+    <p class="hint" id="pasteLabel"></p>
+    <input id="pairPaste" placeholder="Pega aquí el enlace" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <button class="btn" id="pasteGo">Usar enlace</button>
+  </div>
   <p class="err" id="pairErr"></p>
-  <div class="dlgbtns"><button class="btn" id="pairCancel">Cancelar</button><button class="btn primary" id="pairScan">Escanear código</button></div>
+  <div class="dlgbtns">
+    <button class="btn" id="pairCancel">Cancelar</button>
+    <button class="btn" id="pairCopy">Copiar enlace</button>
+    <button class="btn" id="pairShare">Compartir</button>
+    <button class="btn primary" id="pairScan">Escanear</button>
+  </div>
 </dialog>
 <audio id="remoteAudio" autoplay playsinline></audio>
 <script src="https://unpkg.com/qrcode-generator@1.4.4/qrcode.js" crossorigin="anonymous"></script>

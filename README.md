@@ -2,18 +2,20 @@
 
 Esta carpeta es la forma de cumplir el requisito de **un enlace que se pueda enviar a cualquier persona**, tenga iPhone o Android, **sin pagar y sin Mac**.
 
-> Guía visual para usuarios: [`../gui/Guia_Radio_Movil.pdf`](../gui/Guia_Radio_Movil.pdf) (5 páginas, con capturas y pasos).
+> Guía visual para usuarios: [`../gui/Guia_Radio_Movil.pdf`](../gui/Guia_Radio_Movil.pdf) (6 páginas, con capturas y pasos).
 
 ## Qué es
 
 Una app web instalable (PWA) con la **misma interfaz de la maqueta** (fondo oscuro, acento lima, pestañas Hablar/Mensajes/Mapa, PTT circular). Se abre desde un enlace HTTPS, se añade a la pantalla de inicio y funciona sin internet porque el service worker guarda todos los archivos.
 
-La comunicación entre móviles es **directa, de móvil a móvil**, mediante WebRTC con señalización por código QR:
+La comunicación entre móviles es **directa, de móvil a móvil**, mediante WebRTC. El emparejamiento se hace con **enlaces compartibles** ( AirDrop, Compartir cerca, Bluetooth…) y el QR queda como alternativa:
 
-1. Un móvil pulsa **Crear grupo** → muestra un QR con su oferta.
-2. El otro pulsa **Unirse** → escanea el QR → muestra su QR de respuesta.
-3. El primero escanea la respuesta → conexión establecida.
-4. Ya pueden enviarse texto, posición y mantener pulsado el PTT para hablar.
+1. Un móvil pulsa **Crear grupo** → pulsa **Compartir** y envía el enlace.
+2. El otro abre el enlace → pulsa **Compartir respuesta** y te la devuelve.
+3. El primero **pega la respuesta** en el recuadro → conexión establecida.
+4. Si no se pueden compartir enlaces, cualquiera de los dos puede usar los botones de cámara para escanear los QR.
+
+Ya pueden enviarse texto, posición y mantener pulsado el PTT para hablar. El SDP se comprime a un formato propio (prefijo `RMO2.`), de ~400 caracteres, para que el QR tenga 69 módulos en vez de 177 y sea legible de móvil a móvil.
 
 No hay cuenta, ni servidor de señalización, ni tráfico por internet. Los dos móviles deben estar en la misma Wi‑Fi o hotspot (por ejemplo, el hotspot de uno de ellos, aunque no tenga datos).
 
@@ -29,7 +31,7 @@ La URL es la misma para los dos sistemas. No hay que pasar por App Store ni Test
 ## Qué funciona ya
 
 - Interfaz idéntica a la maqueta, con tema oscuro/lima.
-- Emparejamiento por QR entre dos móviles (cámara + `jsQR`).
+- Emparejamiento por **enlaces compartibles** o por QR (cámara + `jsQR`).
 - Texto en el canal e historial.
 - Envío de posición, distancia y rumbo en el radar.
 - Voz PTT: el micrófono se activa solo mientras se mantiene pulsado.
@@ -44,7 +46,7 @@ La URL es la misma para los dos sistemas. No hay que pasar por App Store ni Test
 - **Emparejamiento por QR**, no descubrimiento automático de malla como mesh-walkie. Para grupos de más de dos personas hace falta repetir el emparejamiento (está previsto el modo estrella con repetidor).
 - WebRTC en Safari/iOS puede variar según la versión: **hay que probarlo en dos móviles reales**. En Android/Chrome funciona mejor.
 - iOS limita la ejecución en segundo plano; con la app en primer plano funciona.
-- La reconexión automática solo funciona si la app sigue abierta; si se cierra o se reinicia el móvil hay que repetir el QR.
+- La reconexión automática solo funciona si la app sigue abierta; si se cierra o se reinicia el móvil hay que repetir el emparejamiento.
 - El audio usa el track de WebRTC; si dos personas hablan a la vez se solapan (no hay mezcla aún).
 - Para cobertura kilométrica seguiría haciendo falta hardware externo; aquí el alcance es el del hotspot/Wi‑Fi local.
 
