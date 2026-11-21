@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0B0F14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Radio Móvil">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>Radio Móvil</title>
+<style>
+:root{
+  --bg:#0B0F14; --surface:#141B24; --surface2:#1B2430; --line:#2A3543;
+  --text:#E9EEF4; --muted:#8D9AAC; --accent:#D9FF5C; --ink:#11160C;
+  --orange:#FF9D4D; --ok:#58D98A;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  -webkit-tap-highlight-color:transparent}
+body{display:flex;flex-direction:column;overflow:hidden;padding-top:env(safe-area-inset-top)}
+header{background:var(--surface);padding:14px 16px;border-bottom:1px solid var(--line)}
+.hrow{display:flex;align-items:center;gap:12px}
+.logo{width:42px;height:42px;border-radius:12px;background:var(--accent);color:var(--ink);
+  display:grid;place-items:center;font-size:24px;font-weight:800;flex:none}
+.title{font-size:18px;font-weight:800;letter-spacing:.4px}
+.sub{font-size:12px;color:var(--muted);margin-top:2px}
+.spacer{flex:1}
+.iconbtn{border:1px solid var(--line);background:var(--surface2);color:var(--text);
+  border-radius:10px;padding:8px 12px;font-size:18px}
+.status{margin-top:12px;border:1px solid var(--line);background:var(--surface2);
+  border-radius:12px;padding:9px 12px;display:flex;justify-content:space-between;
+  font-size:12px;color:var(--muted)}
+.status b{color:var(--ok);font-weight:600}
+.tabs{display:flex;gap:6px;padding:12px 16px}
+.tab{flex:1;text-align:center;padding:10px 0;border-radius:10px;background:var(--surface2);
+  color:var(--muted);font-size:13px;font-weight:600;border:0}
+.tab.active{background:var(--accent);color:var(--ink)}
+main{flex:1;overflow:auto;padding:4px 16px 100px}
+.panel{display:none}.panel.active{display:block}
+.card{background:var(--surface2);border:1px solid var(--line);border-radius:14px;padding:14px}
+.label{font-size:11px;letter-spacing:1px;color:var(--muted);font-weight:700;text-transform:uppercase}
+.channel{color:var(--accent);font-weight:800;font-size:16px;margin-top:4px}
+.hint{font-size:11px;color:var(--muted)}
+.pttwrap{display:grid;place-items:center;padding:26px 0 8px}
+#ptt{width:176px;height:176px;border-radius:50%;border:0;background:var(--accent);color:var(--ink);
+  font-size:15px;font-weight:800;touch-action:none;user-select:none;
+  box-shadow:0 0 0 10px rgba(217,255,92,.08)}
+#ptt.down{background:var(--orange);transform:scale(.97)}
+.pttnote{text-align:center;color:var(--muted);font-size:12px;margin-top:10px}
+.voice{text-align:center;color:var(--orange);font-size:12px;min-height:18px;margin-top:4px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.btn{background:var(--surface2);border:1px solid var(--line);color:var(--accent);
+  border-radius:12px;padding:10px 14px;font-size:13px;font-weight:600}
+.btn.primary{background:var(--accent);color:var(--ink);border-color:var(--accent)}
+.peer{display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--line);
+  border-radius:12px;padding:10px 12px;margin-top:6px}
+.avatar{width:34px;height:34px;border-radius:10px;background:#344154;color:var(--accent);
+  display:grid;place-items:center;font-weight:800}
+.peer .name{font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.peer .meta{font-size:11px;color:var(--muted)}
+.sig{color:var(--ok);font-size:11px;letter-spacing:1px}
+#messages{display:flex;flex-direction:column;gap:8px;min-height:60vh}
+.msg{background:var(--surface2);border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+.msg .who{font-size:11px;color:var(--accent);font-weight:700}
+.msg .body{font-size:13px;margin-top:3px;word-break:break-word}
+.msg .time{font-size:10px;color:var(--muted);margin-top:5px}
+.composer{position:fixed;left:16px;right:16px;bottom:16px;display:flex;gap:8px;
+  background:var(--bg);padding-top:8px}
+.composer input{flex:1;background:var(--surface2);border:1px solid var(--line);color:var(--text);
+  border-radius:12px;padding:12px;font-size:14px;min-width:0}
+#radar{width:100%;height:260px;background:var(--surface2);border:1px solid var(--line);border-radius:16px}
+dialog{border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:16px;
+  padding:18px;max-width:420px;width:calc(100% - 32px)}
+dialog::backdrop{background:rgba(0,0,0,.72)}
+dialog input{width:100%;background:var(--surface2);border:1px solid var(--line);color:var(--text);
+  border-radius:10px;padding:10px;margin:10px 0;font-size:14px}
+#qr{display:block;margin:12px auto;max-width:100%;background:#fff;padding:8px;border-radius:10px}
+#scanVideo{width:100%;border-radius:12px;background:#000;display:none}
+#scanCanvas{display:none}
+.dlgbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap}
+.err{color:var(--orange);font-size:12px;min-height:16px}
+</style>
+</head>
+<body>
+<header>
+  <div class="hrow">
+    <div class="logo">⌁</div>
+    <div><div class="title">RADIO MÓVIL</div><div class="sub" id="channelLabel">Canal: CHANNEL-1</div></div>
+    <div class="spacer"></div>
+    <button class="iconbtn" id="menuBtn">⋮</button>
+  </div>
+  <div class="status"><span id="netStatus"><b>●</b> Sin internet · listo</span><span id="peerCount">0 cercanos</span></div>
+</header>
+<div class="tabs">
+  <button class="tab active" data-tab="talk">Hablar</button>
+  <button class="tab" data-tab="msgs">Mensajes</button>
+  <button class="tab" data-tab="map">Mapa</button>
+</div>
+<main>
+  <section class="panel active" id="talk">
+    <div class="card" id="channelCard">
+      <div class="label">Canal de radio</div><div class="channel" id="channelBig">CHANNEL-1</div>
+      <div class="hint">toca para cambiar →</div>
+    </div>
+    <div class="pttwrap"><button id="ptt">PTT<br><span style="font-size:11px;font-weight:500">mantén pulsado</span></button></div>
+    <div class="pttnote">Mantén pulsado. Todos los del canal escuchan.</div>
+    <div class="voice" id="voiceNote"></div>
+    <div class="row">
+      <button class="btn primary" id="createBtn">Crear grupo</button>
+      <button class="btn" id="joinBtn">Unirse</button>
+      <button class="btn" id="writeBtn">Escribir</button>
+      <button class="btn" id="posBtn">📍 Mi posición</button>
+    </div>
+    <p class="hint" style="margin-top:18px">Cercanos en el canal</p>
+    <div id="peers"></div>
+    <p class="hint" id="appStatus">Conecta dos móviles: uno crea el grupo y el otro se une escaneando el código.</p>
+  </section>
+  <section class="panel" id="msgs">
+    <p class="label">Conversación del canal</p>
+    <div id="messages"></div>
+  </section>
+  <section class="panel" id="map">
+    <p class="label">Radar local</p>
+    <canvas id="radar" width="600" height="520"></canvas>
+    <p class="hint">Distancias calculadas en el móvil. Nada se envía a un servidor.</p>
+    <p class="label" style="margin-top:16px">Cercanos</p><div id="nearby"></div>
+  </section>
+</main>
+<div class="composer"><input id="draft" placeholder="Escribe al canal…" maxlength="300"><button class="btn primary" id="sendBtn">Enviar</button></div>
+
+<dialog id="channelDlg">
+  <p class="label">Canal de radio</p><input id="channelInput" maxlength="24">
+  <div class="dlgbtns"><button class="btn" id="channelCancel">Cancelar</button><button class="btn primary" id="channelSave">Cambiar</button></div>
+</dialog>
+<dialog id="menuDlg">
+  <p class="label">Opciones</p>
+  <div class="row"><button class="btn" id="menuChannel">Cambiar canal</button><button class="btn" id="menuHelp">Cómo usar</button><button class="btn" id="menuInstall">Instalar en pantalla de inicio</button><button class="btn" id="menuClose">Cerrar</button></div>
+</dialog>
+<dialog id="helpDlg">
+  <p class="label">Cómo usar</p>
+  <p class="hint">1) Los dos móviles se conectan a la misma Wi‑Fi o a un hotspot (sin internet).<br>
+  2) Uno pulsa <b>Crear grupo</b> y muestra el código.<br>
+  3) El otro pulsa <b>Unirse</b>, escanea el código y muestra su código de respuesta.<br>
+  4) El primero escanea la respuesta. Ya están conectados.<br>
+  5) Añade esta página a la pantalla de inicio para usarla como app, también sin internet.</p>
+  <div class="dlgbtns"><button class="btn primary" id="helpClose">Entendido</button></div>
+</dialog>
+<dialog id="pairDlg">
+  <p class="label" id="pairTitle">Código para unirse</p>
+  <img id="qr" alt="Código QR">
+  <video id="scanVideo" playsinline muted autoplay></video><canvas id="scanCanvas"></canvas>
+  <p class="err" id="pairErr"></p>
+  <div class="dlgbtns"><button class="btn" id="pairCancel">Cancelar</button><button class="btn primary" id="pairScan">Escanear código</button></div>
+</dialog>
+<audio id="remoteAudio" autoplay playsinline></audio>
+<script src="https://unpkg.com/qrcode-generator@1.4.4/qrcode.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/jsqr@1.4.0/dist/jsQR.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lz-string@1.5.0/libs/lz-string.min.js" crossorigin="anonymous"></script>
+<script src="app.js"></script>
+</body>
+</html>
