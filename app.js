@@ -208,7 +208,11 @@ function playPCM(data) {
   nextAudioTime += buf.duration;
 }
 function newPC() {
-  const p = new RTCPeerConnection({ iceServers: [] });
+  /* STUN público gratuito: necesario con PIN si los móviles están en redes distintas
+     (uno con datos, otro en Wi‑Fi). No pasa tráfico de voz por él. */
+  const p = new RTCPeerConnection({ iceServers: [
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }
+  ] });
   p.ontrack = () => { /* la voz viaja por el canal de datos: ver playPCM() */ };
   p.addEventListener('iceconnectionstatechange', () => {
     const s = p.iceConnectionState;
@@ -381,6 +385,7 @@ async function handlePinMessage(topic, m) {
     if (pinHandled) return;
     pinHandled = true;
     clearInterval(pinReadyTimer); pinReadyTimer = 0;
+    $('pinErr').textContent = 'Preparando conexión…';
     try {
       const stream = await ensureMic();
       initiatedByMe = false;
