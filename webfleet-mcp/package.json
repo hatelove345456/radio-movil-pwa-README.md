@@ -1,0 +1,13 @@
+{
+  "name": "webfleet-compat-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "bin": { "webfleet-compat-mcp": "src/server.js" },
+  "scripts": { "start": "node src/server.js", "test": "node --test test/*.test.js" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "exceljs": "^4.4.0",
+    "zod": "^3.23.0"
+  }
+}
