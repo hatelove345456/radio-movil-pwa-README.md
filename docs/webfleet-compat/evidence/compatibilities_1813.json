@@ -1,0 +1,47 @@
+{
+  "featureList" : {
+    "canFdRequired" : false,
+    "ip67BoxRequiredForLink" : false,
+    "j1708ConnectionRequired" : false,
+    "lidCoverCannotBePlacedBack" : false,
+    "noCanBusFound" : false,
+    "noGpsCoverageWithoutAntenna" : false,
+    "noInstallationManual" : false,
+    "noUsefulDataInCanBus" : false,
+    "weakGpsSignalInObdPort" : false
+  },
+  "featureYCable" : {
+    "enabled" : false
+  },
+  "features1xxLink" : {
+    "features" : [ "LogbookWithRealVehicleOdometer", "Speeding", "DrivingEvents", "ConstantSpeed", "GreenSpeed" ]
+  },
+  "features2xxLink" : {
+    "directFms" : false,
+    "features" : [ "ABS", "LogbookWithRealVehicleOdometer", "ReportingOfFuelLevel", "Speeding", "DrivingEvents", "ConstantSpeed", "GreenSpeed", "MotorEcs", "OilPressureLow", "BatteryVoltage" ],
+    "fitmentInformation" : {
+      "covered" : true,
+      "deviceMechanicalFit" : "EXTENSION_CABLE_REQUIRED",
+      "obdPortLocation" : "1",
+      "obdSupported" : true,
+      "technicalComment" : "COVER_DOES_NOT_CLOSE_DONGLE_ATTACHED"
+    },
+    "link210Supported" : true
+  },
+  "features6xxLink" : {
+    "canBusesCount" : 1,
+    "directFms" : false,
+    "externalAntennaRequired" : false,
+    "features" : [ "LogbookWithRealVehicleOdometer", "Speeding", "DrivingEvents", "ConstantSpeed", "GreenSpeed", "Idling", "GearShifting" ]
+  },
+  "features7xxLink" : {
+    "canBusesCount" : 1,
+    "directFms" : false,
+    "externalAntennaRequired" : false,
+    "features" : [ "LogbookWithRealVehicleOdometer", "Speeding", "DrivingEvents", "ConstantSpeed", "GreenSpeed", "Idling", "GearShifting" ]
+  },
+  "featuresOEM" : {
+    "oemSupported" : false
+  },
+  "vehicleGenerationNo" : 348
+}
